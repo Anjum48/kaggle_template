@@ -34,7 +34,7 @@ def prepare_args(config_path=CONFIG_PATH, default_config="default_run"):
         action="store",
         dest="gpus",
         help="Number of GPUs",
-        default=2,
+        default=None,
         type=int,
     )
 
