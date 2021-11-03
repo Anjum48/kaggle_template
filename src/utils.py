@@ -233,21 +233,24 @@ def memory_cleanup():
     torch.cuda.empty_cache()
 
 
-# https://github.com/rwightman/pytorch-image-models/blob/master/timm/optim/optim_factory.py#L25
-def add_weight_decay(model, weight_decay=1e-5, skip_list=()):
+# https://github.com/rwightman/pytorch-image-models/blob/ddc29da974023416ac2bf2468a80a18438c0090d/timm/optim/optim_factory.py#L31-L43
+def add_weight_decay(
+    model, 
+    weight_decay=1e-5, 
+    skip_list=("bias", "bn", "LayerNorm.bias", "LayerNorm.weight")
+):
     decay = []
     no_decay = []
     for name, param in model.named_parameters():
         if not param.requires_grad:
-            continue
-        if len(param.shape) == 1 or any(s in name for s in skip_list):
+            continue  # frozen weights
+        if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
             no_decay.append(param)
         else:
             decay.append(param)
     return [
-        {"params": no_decay, "weight_decay": 0.0},
-        {"params": decay, "weight_decay": weight_decay},
-    ]
+        {'params': no_decay, 'weight_decay': 0.},
+        {'params': decay, 'weight_decay': weight_decay}]
 
 
 def mixup_data(x, y, alpha=1.0):
