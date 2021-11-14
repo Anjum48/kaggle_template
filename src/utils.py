@@ -12,6 +12,7 @@ from pytorch_lightning.callbacks import (
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
+    Callback,
 )
 from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger, WandbLogger
 
@@ -251,6 +252,26 @@ def add_weight_decay(
     return [
         {'params': no_decay, 'weight_decay': 0.},
         {'params': decay, 'weight_decay': weight_decay}]
+
+
+class LogSummaryCallback(Callback):
+    def __init__(self, metric_name, summary_type="min"):
+        super().__init__()
+        self.metric_name = metric_name
+        self.summary_type = summary_type
+        self.best_value = torch.inf if summary_type == "min" else -torch.inf
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        metric_value = trainer.callback_metrics[self.metric_name]
+
+        if self.summary_type == "min" and metric_value < self.best_value:
+            self.best_value = metric_value
+        elif self.summary_type == "max" and metric_value > self.best_value:
+            self.best_value = metric_value
+        else:
+            pass
+
+        pl_module.log(f"{self.metric_name}_{self.summary_type}", self.best_value)
 
 
 def mixup_data(x, y, alpha=1.0):
