@@ -5,7 +5,6 @@ from datetime import datetime
 
 import numpy as np
 import torch
-import torch.nn as nn
 import yaml
 from coolname import generate_slug
 from pytorch_lightning.callbacks import (
@@ -168,20 +167,24 @@ def prepare_loggers_and_callbacks(
     """
     save_path = OUTPUT_PATH / timestamp
 
-    callbacks = [LearningRateMonitor(logging_interval="epoch")]
+    callbacks, loggers = {}, {}
+
+    callbacks["lr"] = LearningRateMonitor(logging_interval="epoch")
 
     if "/" in encoder_name:
         encoder_name = encoder_name.replace("/", "_")
 
     if patience:
-        callbacks.append(EarlyStopping("loss/valid", patience=patience))
+        callbacks["early_stopping"] = EarlyStopping("loss/valid", patience=patience)
 
     for monitor, mode, suffix in monitors:
 
         if suffix is not None and suffix != "":
-            filename = "{epoch:02d}-{rmse:.4f}" + f"_{suffix}"
+            filename = "{epoch:02d}-{f2:.4f}" + f"_{suffix}"
+        elif len(monitors) == 1:
+            filename = "{epoch:02d}"
         else:
-            filename = "{epoch:02d}-{rmse:.4f}"
+            filename = "{epoch:02d}-{f2:.4f}"
 
         checkpoint = ModelCheckpoint(
             dirpath=save_path / encoder_name / f"fold_{fold}",
@@ -190,9 +193,7 @@ def prepare_loggers_and_callbacks(
             mode=mode,
             save_weights_only=save_weights_only,
         )
-        callbacks.append(checkpoint)
-
-    loggers = []
+        callbacks["checkpoint"] = checkpoint
 
     if tensorboard:
         tb_logger = TensorBoardLogger(
@@ -200,7 +201,7 @@ def prepare_loggers_and_callbacks(
             name=encoder_name,
             version=f"fold_{fold}",
         )
-        loggers.append(tb_logger)
+        loggers["tensorboard"] = tb_logger
 
     if wandb:
         wandb_logger = WandbLogger(
@@ -209,7 +210,7 @@ def prepare_loggers_and_callbacks(
             project=COMP_NAME,
             id=run_id,
         )
-        loggers.append(wandb_logger)
+        loggers["wandb"] = wandb_logger
 
     if neptune:
         neptune_logger = NeptuneLogger(
@@ -217,7 +218,7 @@ def prepare_loggers_and_callbacks(
             project_name=f"anjum48/{COMP_NAME}",
             experiment_name=f"{timestamp}-fold{fold}",
         )
-        loggers.append(neptune_logger)
+        loggers["neptune"] = neptune_logger
 
     return loggers, callbacks
 
@@ -236,9 +237,9 @@ def memory_cleanup():
 
 # https://github.com/rwightman/pytorch-image-models/blob/ddc29da974023416ac2bf2468a80a18438c0090d/timm/optim/optim_factory.py#L31-L43
 def add_weight_decay(
-    model, 
-    weight_decay=1e-5, 
-    skip_list=("bias", "bn", "LayerNorm.bias", "LayerNorm.weight")
+    model,
+    weight_decay=1e-5,
+    skip_list=("bias", "bn", "LayerNorm.bias", "LayerNorm.weight"),
 ):
     decay = []
     no_decay = []
@@ -250,8 +251,23 @@ def add_weight_decay(
         else:
             decay.append(param)
     return [
-        {'params': no_decay, 'weight_decay': 0.},
-        {'params': decay, 'weight_decay': weight_decay}]
+        {"params": no_decay, "weight_decay": 0.0},
+        {"params": decay, "weight_decay": weight_decay},
+    ]
+
+
+def mixup_data(x, y, alpha=1.0, return_idx=False):
+    """Returns mixed inputs, pairs of targets, and lambda"""
+    lam = np.random.beta(alpha, alpha)
+    batch_size = x.size()[0]
+    index = torch.randperm(batch_size, requires_grad=False).to(x.device)
+
+    mixed_x = lam * x + (1 - lam) * x[index, :]
+    y_a, y_b = y, y[index]
+    if return_idx:
+        return mixed_x, y_a, y_b, lam, index
+    else:
+        return mixed_x, y_a, y_b, lam
 
 
 class LogSummaryCallback(Callback):
@@ -272,17 +288,6 @@ class LogSummaryCallback(Callback):
             pass
 
         pl_module.log(f"{self.metric_name}_{self.summary_type}", self.best_value)
-
-
-def mixup_data(x, y, alpha=1.0):
-    """Returns mixed inputs, pairs of targets, and lambda"""
-    lam = np.random.beta(alpha, alpha)
-    batch_size = x.size()[0]
-    index = torch.randperm(batch_size, requires_grad=False).to(x.device)
-
-    mixed_x = lam * x + (1 - lam) * x[index, :]
-    y_a, y_b = y, y[index]
-    return mixed_x, y_a, y_b, lam
 
 
 def mixup_data_multiobjective(x, y1, y2, alpha=1.0):
