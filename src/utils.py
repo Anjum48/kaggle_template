@@ -193,7 +193,7 @@ def prepare_loggers_and_callbacks(
             mode=mode,
             save_weights_only=save_weights_only,
         )
-        callbacks["checkpoint"] = checkpoint
+        callbacks[f"checkpoint_{monitor}"] = checkpoint
 
     if tensorboard:
         tb_logger = TensorBoardLogger(
