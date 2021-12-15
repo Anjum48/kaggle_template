@@ -1,0 +1,10 @@
+model_source: ross
+model_name: efficientdet
+encoder: tf_d5_ap
+batch_size: 2
+learning_rate: 0.001
+img_size: [1280, 1280]
+presize: 720
+detection_threshold: 0.5
+extra_args:
+  img_size: [1280, 1280] # IceVision has width/height the wrong way round

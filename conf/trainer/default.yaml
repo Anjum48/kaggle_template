@@ -1,0 +1,8 @@
+max_epochs: 20
+accelerator: gpu
+devices: 2
+strategy: ddp
+precision: 16
+sync_batchnorm: True
+# limit_train_batches: 0.1
+# limit_val_batches: 0.1

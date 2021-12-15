@@ -1,0 +1,21 @@
+defaults:
+  - model: baseline
+  - trainer: default
+
+run:
+  timestamp: ${now:%Y%m%d-%H%M%S}
+  n_folds: 5
+  fold: 0
+  seed: 48
+  logging: True
+  train_file: train_folds_balanced.csv
+
+comp_name: tensorflow-great-barrier-reef
+storage_drive: storage_dimm2
+
+hydra:
+  run:
+    dir: /mnt/${storage_drive}/kaggle_output/${comp_name}/${run.timestamp}/${model.encoder}/fold_${run.fold}/
+# sweep:
+#   dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+#   subdir: ${hydra.job.num}
