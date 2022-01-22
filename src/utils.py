@@ -192,6 +192,7 @@ def prepare_loggers_and_callbacks(
             monitor=monitor,
             mode=mode,
             save_weights_only=save_weights_only,
+            save_last=True,
         )
         callbacks[f"checkpoint_{monitor}"] = checkpoint
 
