@@ -169,7 +169,7 @@ def prepare_loggers_and_callbacks(
 
     callbacks, loggers = {}, {}
 
-    callbacks["lr"] = LearningRateMonitor(logging_interval="epoch")
+    callbacks["lr"] = LearningRateMonitor(logging_interval="step")
 
     if "/" in encoder_name:
         encoder_name = encoder_name.replace("/", "_")
