@@ -8,10 +8,11 @@ import torch
 import yaml
 from coolname import generate_slug
 from pytorch_lightning.callbacks import (
+    Callback,
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
-    Callback,
+    RichProgressBar,
 )
 from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger, WandbLogger
 
@@ -104,7 +105,7 @@ def prepare_args(config_path=CONFIG_PATH, default_config="default_run"):
     return args
 
 
-def resume_helper(args):
+def resume_helper(timestamp=None, model_name=None, fold=1, wandb_id=None):
     """
     To resume a run, add this to the YAML/args:
 
@@ -117,14 +118,16 @@ def resume_helper(args):
     Returns:
         [type]: [description]
     """
-    if hasattr(args, "checkpoint"):
-        paths = (
-            OUTPUT_PATH / args.checkpoint / args.encoder / f"fold_{args.fold - 1}"
-        ).glob("*.*loss.ckpt")
-        resume = list(paths)[0]
+    if timestamp is not None:
+        # paths = (OUTPUT_PATH / timestamp / model_name / f"fold_{fold - 1}").glob(
+        #     "*.*loss.ckpt"
+        # )
+        # resume = list(paths)[0]
 
-        if hasattr(args, "wandb_id"):
-            run_id = args.wandb_id
+        resume = OUTPUT_PATH / timestamp / model_name / f"fold_{fold - 1}" / "last.ckpt"
+
+        if wandb_id is not None:
+            run_id = wandb_id
         else:
             print("No wandb_id provided. Logging as new run")
             run_id = None
@@ -170,6 +173,7 @@ def prepare_loggers_and_callbacks(
     callbacks, loggers = {}, {}
 
     callbacks["lr"] = LearningRateMonitor(logging_interval="step")
+    callbacks["progress"] = RichProgressBar()
 
     if "/" in encoder_name:
         encoder_name = encoder_name.replace("/", "_")
@@ -180,11 +184,11 @@ def prepare_loggers_and_callbacks(
     for monitor, mode, suffix in monitors:
 
         if suffix is not None and suffix != "":
-            filename = "{epoch:02d}-{f2:.4f}" + f"_{suffix}"
+            filename = "{epoch:02d}-{metric:.4f}" + f"_{suffix}"
         elif len(monitors) == 1:
             filename = "{epoch:02d}"
         else:
-            filename = "{epoch:02d}-{f2:.4f}"
+            filename = "{epoch:02d}-{metric:.4f}"
 
         checkpoint = ModelCheckpoint(
             dirpath=save_path / encoder_name / f"fold_{fold}",
@@ -279,16 +283,23 @@ class LogSummaryCallback(Callback):
         self.best_value = torch.inf if summary_type == "min" else -torch.inf
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        metric_value = trainer.callback_metrics[self.metric_name]
+        try:
+            metric_value = trainer.callback_metrics[self.metric_name]
 
-        if self.summary_type == "min" and metric_value < self.best_value:
-            self.best_value = metric_value
-        elif self.summary_type == "max" and metric_value > self.best_value:
-            self.best_value = metric_value
-        else:
+            if self.summary_type == "min" and metric_value < self.best_value:
+                self.best_value = metric_value
+            elif self.summary_type == "max" and metric_value > self.best_value:
+                self.best_value = metric_value
+            else:
+                pass
+
+            pl_module.log(
+                f"{self.metric_name}_{self.summary_type}",
+                self.best_value,
+                sync_dist=True,
+            )
+        except KeyError:
             pass
-
-        pl_module.log(f"{self.metric_name}_{self.summary_type}", self.best_value)
 
 
 def mixup_data_multiobjective(x, y1, y2, alpha=1.0):
