@@ -6,6 +6,7 @@ from datetime import datetime
 import numpy as np
 import torch
 import yaml
+from omegaconf import ListConfig
 from coolname import generate_slug
 from pytorch_lightning.callbacks import (
     Callback,
@@ -17,92 +18,6 @@ from pytorch_lightning.callbacks import (
 from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger, WandbLogger
 
 from src.config import COMP_NAME, CONFIG_PATH, OUTPUT_PATH
-
-
-def prepare_args(config_path=CONFIG_PATH, default_config="default_run"):
-    parser = ArgumentParser()
-
-    parser.add_argument(
-        "--config",
-        action="store",
-        dest="config",
-        help="Configuration scheme",
-        default=default_config,
-    )
-
-    parser.add_argument(
-        "--gpus",
-        action="store",
-        dest="gpus",
-        help="Number of GPUs",
-        default=None,
-        type=int,
-    )
-
-    parser.add_argument(
-        "--timestamp",
-        action="store",
-        dest="timestamp",
-        help="Timestamp for versioning",
-        default=str(datetime.now().strftime("%Y%m%d-%H%M%S")),
-        type=str,
-    )
-
-    parser.add_argument(
-        "--fold",
-        action="store",
-        dest="fold",
-        help="Fold number",
-        default=1,
-        type=int,
-    )
-
-    parser.add_argument(
-        "--seed",
-        action="store",
-        dest="seed",
-        help="Random seed",
-        default=48,
-        type=int,
-    )
-
-    parser.add_argument(
-        "--slug",
-        action="store",
-        dest="slug",
-        help="Human rememebrable run group",
-        default=generate_slug(3),
-        type=str,
-    )
-
-    parser.add_argument(
-        "--logging",
-        dest="logging",
-        action="store_true",
-        help="Flag to log to WandB (on by default)",
-    )
-
-    parser.add_argument(
-        "--no-logging",
-        dest="logging",
-        action="store_false",
-        help="Flag to prevent logging",
-    )
-    parser.set_defaults(logging=True)
-
-    args = parser.parse_args()
-
-    # Lookup the config from the YAML file and set args
-    with open(config_path, "r") as ymlfile:
-        cfg = yaml.load(ymlfile, Loader=yaml.FullLoader)
-
-        if args.config != default_config:
-            print("Using", args.config, "configuration")
-
-        for k, v in cfg[args.config].items():
-            setattr(args, k, v)
-
-    return args
 
 
 def resume_helper(timestamp=None, model_name=None, fold=1, wandb_id=None):
@@ -136,6 +51,18 @@ def resume_helper(timestamp=None, model_name=None, fold=1, wandb_id=None):
         run_id = None
 
     return resume, run_id
+
+
+def get_num_steps(cfg, dm):
+    if isinstance(cfg.trainer.devices, ListConfig):
+        n_devices = len(cfg.trainer.devices)
+    else:
+        n_devices = cfg.trainer.devices
+
+    n_steps = (cfg.trainer.max_epochs) * dm.train_steps
+    n_steps *= cfg.trainer.get("limit_train_batches", 1.0)
+    n_steps /= cfg.trainer.get("accumulate_grad_batches", 1.0)
+    return int(n_steps)
 
 
 def prepare_loggers_and_callbacks(
@@ -191,13 +118,15 @@ def prepare_loggers_and_callbacks(
             filename = "{epoch:02d}-{metric:.4f}"
 
         checkpoint = ModelCheckpoint(
-            dirpath=save_path / encoder_name / f"fold_{fold}",
+            dirpath=save_path / f"fold_{fold}",
             filename=filename,
             monitor=monitor,
             mode=mode,
             save_weights_only=save_weights_only,
-            save_last=True,
+            save_last=i == 0,
+            auto_insert_metric_name=True,
         )
+        checkpoint.CHECKPOINT_EQUALS_CHAR = ""
         callbacks[f"checkpoint_{monitor}"] = checkpoint
 
     if tensorboard:
@@ -273,33 +202,6 @@ def mixup_data(x, y, alpha=1.0, return_idx=False):
         return mixed_x, y_a, y_b, lam, index
     else:
         return mixed_x, y_a, y_b, lam
-
-
-class LogSummaryCallback(Callback):
-    def __init__(self, metric_name, summary_type="min"):
-        super().__init__()
-        self.metric_name = metric_name
-        self.summary_type = summary_type
-        self.best_value = torch.inf if summary_type == "min" else -torch.inf
-
-    def on_validation_epoch_end(self, trainer, pl_module):
-        try:
-            metric_value = trainer.callback_metrics[self.metric_name]
-
-            if self.summary_type == "min" and metric_value < self.best_value:
-                self.best_value = metric_value
-            elif self.summary_type == "max" and metric_value > self.best_value:
-                self.best_value = metric_value
-            else:
-                pass
-
-            pl_module.log(
-                f"{self.metric_name}_{self.summary_type}",
-                self.best_value,
-                sync_dist=True,
-            )
-        except KeyError:
-            pass
 
 
 def mixup_data_multiobjective(x, y1, y2, alpha=1.0):
