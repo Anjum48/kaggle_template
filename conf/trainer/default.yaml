@@ -1,8 +1,9 @@
-max_epochs: 20
+max_epochs: 5
 accelerator: gpu
 devices: 2
 strategy: ddp
-precision: 16
+precision: 16-mixed
 sync_batchnorm: True
+# fast_dev_run: True
 # limit_train_batches: 0.1
 # limit_val_batches: 0.1
