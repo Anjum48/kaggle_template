@@ -19,6 +19,9 @@ run:
 hydra:
   run:
     dir: ${run.output_dir}/fold_${run.fold}/
-# sweep:
-#   dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
-#   subdir: ${hydra.job.num}
+  sweep:
+    dir: /mnt/${storage_drive}/kaggle_output/${comp_name}/multirun/${now:%Y%m%d-%H%M%S}
+    subdir: ${hydra.job.override_dirname}
+  callbacks:
+    git_hash:
+      _target_: src.utils.GitSHACallback

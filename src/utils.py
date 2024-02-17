@@ -1,9 +1,13 @@
 import gc
 import logging
+import subprocess
 from pathlib import Path
+from typing import Any
+
 
 import numpy as np
 import torch
+from hydra.experimental.callback import Callback
 from lightning.pytorch.callbacks import (
     BasePredictionWriter,
     Callback,
@@ -13,7 +17,7 @@ from lightning.pytorch.callbacks import (
     RichProgressBar,
 )
 from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
-from omegaconf import ListConfig
+from omegaconf import DictConfig, ListConfig
 
 from src.config import COMP_NAME, OUTPUT_PATH
 
@@ -197,6 +201,40 @@ class OOFPredictionWriter(BasePredictionWriter):
             batch_indices,
             self.output_dir / f"batch_indices_fold{fold}_{rank}.pt",
         )
+
+
+class GitSHACallback(Callback):
+    def get_git_revision_hash(self) -> str:
+        return (
+            subprocess.check_output(["git", "rev-parse", "HEAD"])
+            .decode("ascii")
+            .strip()
+        )
+
+    def get_git_revision_short_hash(self) -> str:
+        return (
+            subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+            .decode("ascii")
+            .strip()
+        )
+
+    def on_run_start(self):
+        pass
+
+    def on_run_end(self):
+        pass
+
+    def on_job_start(self):
+        pass
+
+    def on_job_end(self, config: DictConfig, **kwargs: Any):
+        sha = self.get_git_revision_hash()
+
+        output_dir = Path(config.hydra.runtime.output_dir)
+
+        commit_sha_file = output_dir / "sha.txt"
+        with open(commit_sha_file, "w") as f:
+            f.write(sha)
 
 
 def memory_cleanup():
