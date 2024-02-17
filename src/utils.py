@@ -1,23 +1,20 @@
 import gc
 import os
-from argparse import ArgumentParser
-from datetime import datetime
 
 import numpy as np
 import torch
-import yaml
-from omegaconf import ListConfig
 from coolname import generate_slug
-from pytorch_lightning.callbacks import (
+from lightning.pytorch.callbacks import (
     Callback,
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
     RichProgressBar,
 )
-from pytorch_lightning.loggers import NeptuneLogger, TensorBoardLogger, WandbLogger
+from lightning.pytorch.loggers import NeptuneLogger, TensorBoardLogger, WandbLogger
+from omegaconf import ListConfig
 
-from src.config import COMP_NAME, CONFIG_PATH, OUTPUT_PATH
+from src.config import COMP_NAME, OUTPUT_PATH
 
 
 def resume_helper(timestamp=None, model_name=None, fold=1, wandb_id=None):
@@ -102,13 +99,10 @@ def prepare_loggers_and_callbacks(
     callbacks["lr"] = LearningRateMonitor(logging_interval="step")
     callbacks["progress"] = RichProgressBar()
 
-    if "/" in encoder_name:
-        encoder_name = encoder_name.replace("/", "_")
-
     if patience:
         callbacks["early_stopping"] = EarlyStopping("loss/valid", patience=patience)
 
-    for monitor, mode, suffix in monitors:
+    for i, (monitor, mode, suffix) in enumerate(monitors):
 
         if suffix is not None and suffix != "":
             filename = "{epoch:02d}-{metric:.4f}" + f"_{suffix}"
@@ -132,7 +126,7 @@ def prepare_loggers_and_callbacks(
     if tensorboard:
         tb_logger = TensorBoardLogger(
             save_dir=save_path,
-            name=encoder_name,
+            name="",
             version=f"fold_{fold}",
         )
         loggers["tensorboard"] = tb_logger
@@ -155,6 +149,33 @@ def prepare_loggers_and_callbacks(
         loggers["neptune"] = neptune_logger
 
     return loggers, callbacks
+
+
+class LogSummaryCallback(Callback):
+    def __init__(self, metric_name, summary_type="min"):
+        super().__init__()
+        self.metric_name = metric_name
+        self.summary_type = summary_type
+        self.best_value = torch.inf if summary_type == "min" else -torch.inf
+
+    def on_validation_epoch_end(self, trainer, pl_module):
+        try:
+            metric_value = trainer.callback_metrics[self.metric_name]
+
+            if self.summary_type == "min" and metric_value < self.best_value:
+                self.best_value = metric_value
+            elif self.summary_type == "max" and metric_value > self.best_value:
+                self.best_value = metric_value
+            else:
+                pass
+
+            pl_module.log(
+                f"{self.metric_name}_{self.summary_type}",
+                self.best_value,
+                sync_dist=True,
+            )
+        except KeyError:
+            pass
 
 
 def memory_cleanup():
