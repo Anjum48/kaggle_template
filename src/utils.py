@@ -1,20 +1,23 @@
 import gc
-import os
+import logging
+from pathlib import Path
 
 import numpy as np
 import torch
-from coolname import generate_slug
 from lightning.pytorch.callbacks import (
+    BasePredictionWriter,
     Callback,
     EarlyStopping,
     LearningRateMonitor,
     ModelCheckpoint,
     RichProgressBar,
 )
-from lightning.pytorch.loggers import NeptuneLogger, TensorBoardLogger, WandbLogger
+from lightning.pytorch.loggers import TensorBoardLogger, WandbLogger
 from omegaconf import ListConfig
 
 from src.config import COMP_NAME, OUTPUT_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def resume_helper(timestamp=None, model_name=None, fold=1, wandb_id=None):
@@ -63,16 +66,15 @@ def get_num_steps(cfg, dm):
 
 
 def prepare_loggers_and_callbacks(
-    timestamp,
-    encoder_name,
-    fold,
-    monitors=[],
-    patience=None,
-    tensorboard=False,
-    wandb=False,
-    neptune=False,
-    run_id=None,
-    save_weights_only=False,
+    fold: int,
+    output_dir: Path,
+    run_name: str = None,
+    monitors: list = [],
+    patience: int = None,
+    tensorboard: bool = False,
+    wandb: bool = False,
+    run_id: str = None,
+    save_weights_only: bool = False,
 ):
     """
     Utility function to prepare loggers and callbacks
@@ -92,12 +94,16 @@ def prepare_loggers_and_callbacks(
     Returns:
         [type]: [description]
     """
-    save_path = OUTPUT_PATH / timestamp
+    temp = OUTPUT_PATH / "temp"  #  Temporary folder to keep OOFs
+    temp.mkdir(exist_ok=True)
+
+    output_dir = Path(output_dir)
 
     callbacks, loggers = {}, {}
 
     callbacks["lr"] = LearningRateMonitor(logging_interval="step")
     callbacks["progress"] = RichProgressBar()
+    callbacks["oofs_writer"] = OOFPredictionWriter(temp)
 
     if patience:
         callbacks["early_stopping"] = EarlyStopping("loss/valid", patience=patience)
@@ -111,7 +117,7 @@ def prepare_loggers_and_callbacks(
             filename = "{epoch:02d}-{metric:.4f}"
 
         checkpoint = ModelCheckpoint(
-            dirpath=save_path / f"fold_{fold}",
+            dirpath=output_dir / f"fold_{fold}",
             filename=filename,
             monitor=monitor,
             mode=mode,
@@ -124,7 +130,7 @@ def prepare_loggers_and_callbacks(
 
     if tensorboard:
         tb_logger = TensorBoardLogger(
-            save_dir=save_path,
+            save_dir=output_dir,
             name="",
             version=f"fold_{fold}",
         )
@@ -132,20 +138,12 @@ def prepare_loggers_and_callbacks(
 
     if wandb:
         wandb_logger = WandbLogger(
-            name=f"{timestamp}/fold{fold}",
+            name=f"{run_name}/fold{fold}",
             save_dir=OUTPUT_PATH,
             project=COMP_NAME,
             id=run_id,
         )
         loggers["wandb"] = wandb_logger
-
-    if neptune:
-        neptune_logger = NeptuneLogger(
-            api_key=os.environ["NEPTUNE_API_TOKEN"],
-            project_name=f"anjum48/{COMP_NAME}",
-            experiment_name=f"{timestamp}-fold{fold}",
-        )
-        loggers["neptune"] = neptune_logger
 
     return loggers, callbacks
 
@@ -175,6 +173,30 @@ class LogSummaryCallback(Callback):
             )
         except KeyError:
             pass
+
+
+class OOFPredictionWriter(BasePredictionWriter):
+    def __init__(self, output_dir, write_interval: str = "epoch"):
+        super().__init__(write_interval)
+        self.output_dir = output_dir
+
+    def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):
+        """Saves predictions after running inference on all samples."""
+
+        fold = pl_module.hparams.fold
+        rank = trainer.global_rank
+
+        torch.distributed.broadcast_object_list([self.output_dir])
+        torch.distributed.barrier()
+
+        torch.save(
+            predictions,
+            self.output_dir / f"pred_fold{fold}_{rank}.pt",
+        )
+        torch.save(
+            batch_indices,
+            self.output_dir / f"batch_indices_fold{fold}_{rank}.pt",
+        )
 
 
 def memory_cleanup():
