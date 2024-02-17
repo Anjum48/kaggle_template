@@ -103,11 +103,10 @@ def prepare_loggers_and_callbacks(
         callbacks["early_stopping"] = EarlyStopping("loss/valid", patience=patience)
 
     for i, (monitor, mode, suffix) in enumerate(monitors):
-
-        if suffix is not None and suffix != "":
-            filename = "{epoch:02d}-{metric:.4f}" + f"_{suffix}"
-        elif len(monitors) == 1:
+        if len(monitors) == 1:
             filename = "{epoch:02d}"
+        elif suffix is not None and suffix != "":
+            filename = "{epoch:02d}-{metric:.4f}" + f"_{suffix}"
         else:
             filename = "{epoch:02d}-{metric:.4f}"
 
@@ -118,7 +117,7 @@ def prepare_loggers_and_callbacks(
             mode=mode,
             save_weights_only=save_weights_only,
             save_last=i == 0,
-            auto_insert_metric_name=True,
+            # verbose=True,
         )
         checkpoint.CHECKPOINT_EQUALS_CHAR = ""
         callbacks[f"checkpoint_{monitor}"] = checkpoint
