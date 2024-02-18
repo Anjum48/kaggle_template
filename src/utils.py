@@ -64,6 +64,7 @@ def get_num_steps(cfg, dm):
         n_devices = cfg.trainer.devices
 
     n_steps = (cfg.trainer.max_epochs) * dm.train_steps
+    n_steps /= n_devices
     n_steps *= cfg.trainer.get("limit_train_batches", 1.0)
     n_steps /= cfg.trainer.get("accumulate_grad_batches", 1.0)
     return int(n_steps)
